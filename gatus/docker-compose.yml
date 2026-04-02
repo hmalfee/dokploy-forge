@@ -1,0 +1,15 @@
+services:
+  gatus:
+    image: twinproduction/gatus:latest
+    ports:
+      - 8080
+    volumes:
+      - ../files/config:/config
+    restart: always
+    environment:
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL}
+      ALERT_EMAIL: ${ALERT_EMAIL}

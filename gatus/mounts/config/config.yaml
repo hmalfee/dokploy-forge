@@ -1,0 +1,37 @@
+alerting:
+  email:
+    from: ${SMTP_FROM_EMAIL}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    host: ${SMTP_HOST}
+    port: ${SMTP_PORT}
+    to: ${ALERT_EMAIL}
+    default-alert:
+      failure-threshold: 1 # how many consecutive failures before alerting
+      send-on-resolved: true # send a recovery email when it comes back up
+
+endpoints:
+  - name: front-end
+    group: core
+    url: "https://twin.sh/health"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].status == UP"
+      - "[RESPONSE_TIME] < 150"
+    alerts:
+      - type: email
+        description: "front-end is down"
+        send-on-resolved: true
+
+  - name: back-end
+    group: core
+    url: "https://example.org/"
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+      - "[CERTIFICATE_EXPIRATION] > 48h"
+    alerts:
+      - type: email
+        description: "back-end is down"
+        send-on-resolved: true
