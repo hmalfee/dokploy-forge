@@ -1,0 +1,14 @@
+[variables]
+main_domain = "${domain}"
+
+[config]
+env = [
+  "ADMIN_EMAIL=",
+  "ADMIN_PASSWORD=",
+]
+
+[[config.domains]]
+serviceName = "beszel"
+port        = 8090
+host        = "${main_domain}"
+path        = "/"

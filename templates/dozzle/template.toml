@@ -1,0 +1,16 @@
+[variables]
+main_domain = "${domain}"
+
+[config]
+env = [
+  "DOZZLE_PASSWORD=",
+  "DOZZLE_EMAIL=",
+  "DOZZLE_USERNAME=",
+  "DOZZLE_NAME=",
+]
+
+[[config.domains]]
+serviceName = "dozzle"
+port = 8080
+host = "${main_domain}"
+path = "/"

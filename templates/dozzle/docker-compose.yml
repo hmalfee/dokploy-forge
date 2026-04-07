@@ -1,0 +1,46 @@
+services:
+  dozzle-init:
+    image: httpd:alpine
+    restart: no
+    environment:
+      DOZZLE_PASSWORD: ${DOZZLE_PASSWORD:-admin1234}
+      DOZZLE_EMAIL: ${DOZZLE_EMAIL:-admin@admin.com}
+      DOZZLE_NAME: ${DOZZLE_NAME:-Admin}
+      DOZZLE_USERNAME: ${DOZZLE_USERNAME:-admin}
+    volumes:
+      - dozzle-data:/data
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        HASHED=$$(htpasswd -bnBC 11 "" "$$DOZZLE_PASSWORD" | tr -d ':\n')
+        cat > /data/users.yml <<EOF
+        users:
+          $${DOZZLE_USERNAME}:
+            email: $$DOZZLE_EMAIL
+            name: $$DOZZLE_NAME
+            password: $$HASHED
+            roles:
+        EOF
+        echo "users.yml written"
+
+  dozzle:
+    image: amir20/dozzle:10.2.1
+    restart: unless-stopped
+    depends_on:
+      dozzle-init:
+        condition: service_completed_successfully
+    environment:
+      DOZZLE_AUTH_PROVIDER: simple
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - dozzle-data:/data
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  dozzle-data:

@@ -1,0 +1,123 @@
+# just add the below label to any service:
+# labels:
+#   - "kuma.{{ container_name }}.docker.name={{ container_name }}"
+#   - "kuma.{{ container_name }}.docker.docker_container={{ container_name }}"
+
+services:
+  kuma-init:
+    image: python:3.12-alpine
+    restart: on-failure
+    depends_on:
+      uptime-kuma:
+        condition: service_healthy
+    volumes:
+      - uptimekuma-data:/app/data
+    environment:
+      KUMA_URL: http://uptime-kuma:3001
+      KUMA_USERNAME: ${KUMA_USERNAME:-admin}
+      KUMA_PASSWORD: ${KUMA_PASSWORD:-admin1234}
+      PYTHONUNBUFFERED: 1
+    command:
+      - sh
+      - -c
+      - |
+        pip install uptime-kuma-api-v2 bcrypt --root-user-action=ignore -q
+        python -u - << 'EOF_PY'
+        import os, time, sqlite3, bcrypt
+        from uptime_kuma_api import UptimeKumaApi, DockerType
+
+        URL      = os.environ['KUMA_URL']
+        USERNAME = os.environ.get('KUMA_USERNAME', '').strip()
+        PASSWORD = os.environ.get('KUMA_PASSWORD', '').strip()
+        DB_PATH  = '/app/data/kuma.db'
+
+        def sync_db_user():
+            if not USERNAME or not PASSWORD or not os.path.exists(DB_PATH):
+                return
+            # SQLite user table columns: id, username, password, active...
+            conn = sqlite3.connect(DB_PATH)
+            cur  = conn.cursor()
+            
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user'")
+            if not cur.fetchone():
+                conn.close()
+                return
+
+            cur.execute("SELECT id FROM user LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                print(f"Syncing credentials → {DB_PATH}", flush=True)
+                pw_hash = bcrypt.hashpw(PASSWORD.encode(), bcrypt.gensalt(10)).decode()
+                cur.execute("UPDATE user SET username=?, password=? WHERE id=?", (USERNAME, pw_hash, row[0]))
+                conn.commit()
+            conn.close()
+
+        def ensure_docker_host(api):
+            if any(h['dockerType'] == DockerType.SOCKET for h in api.get_docker_hosts()):
+                print('Docker host already exists', flush=True); return
+            api.add_docker_host(name="local", dockerType=DockerType.SOCKET,
+                dockerDaemon="/var/run/docker.sock")
+            print('Docker host created', flush=True)
+
+        while True:
+            try:
+                sync_db_user()
+                with UptimeKumaApi(URL) as api:
+                    # API object waits for server response to needSetup.
+                    # Wait till it stops sending TimeoutErrors, or needs Setup
+                    # UptimeKuma v2 starts with a Socket connection timeout when it resets, so we loop.
+                    api.login(USERNAME, PASSWORD)
+                    ensure_docker_host(api)
+                print('Init done.', flush=True); break
+            except Exception as e:
+                # API throws error when setting up if it's already setup
+                try: 
+                    with UptimeKumaApi(URL) as api:
+                        # Attempt Setup if login fails and setup is needed
+                        res = api.setup(USERNAME, PASSWORD)
+                        print("Setup Response:", res, flush=True)
+                except:
+                    pass
+                print(f'Retrying in 3s: {e}', flush=True)
+                time.sleep(3)
+        EOF_PY
+
+  autokuma:
+    image: ghcr.io/bigboot/autokuma:2.0.0
+    restart: unless-stopped
+    depends_on:
+      kuma-init:
+        condition: service_completed_successfully
+    environment:
+      AUTOKUMA__KUMA__URL: http://uptime-kuma:3001
+      AUTOKUMA__KUMA__USERNAME: ${KUMA_USERNAME:-admin}
+      AUTOKUMA__KUMA__PASSWORD: ${KUMA_PASSWORD:-admin1234}
+      AUTOKUMA__DEFAULT_SETTINGS: "docker.docker_host: 1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - autokuma-data:/data
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:2.2.1
+    restart: unless-stopped
+    environment:
+      UPTIME_KUMA_DB_TYPE: sqlite
+    volumes:
+      - uptimekuma-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3001',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  uptimekuma-data:
+  autokuma-data:

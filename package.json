@@ -1,0 +1,25 @@
+{
+  "name": "dokploy-forge",
+  "version": "1.0.0",
+  "description": "A robust toolkit for building, validating, testing, and generating custom Docker Compose templates for [Dokploy](https://dokploy.com).",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hmalfee/dokploy-forge.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/hmalfee/dokploy-forge/issues"
+  },
+  "homepage": "https://github.com/hmalfee/dokploy-forge#readme",
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "toml": "^4.1.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  }
+}
