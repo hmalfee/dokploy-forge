@@ -8,7 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "yaml";
-import type { ComposeSpecification, DefinitionsService } from "./type";
+import type { ComposeSpecification, DefinitionsService } from "./types";
 
 interface DockerComposeValidatorOptions {
   composePath?: string | null;

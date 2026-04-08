@@ -9,7 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { parse } from "toml";
 import * as yaml from "yaml";
-import type { ComposeSpecification } from "./type";
+import type { ComposeSpecification } from "./types";
 import { processVariables, processValue, type Schema } from "./helpers";
 
 interface TemplateValidatorOptions {
