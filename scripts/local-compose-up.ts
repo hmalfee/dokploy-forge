@@ -1,7 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import { spawnSync, spawn } from "child_process";
 import * as toml from "toml";
+import * as yaml from "yaml";
 
 const die = (msg: string): never => {
   console.error(`❌ local-compose-up.ts: error: ${msg}`);
@@ -18,7 +20,7 @@ const isTemplate = (name: string) => {
   return REQUIRED_FILES.every((file) => fs.existsSync(path.join(dir, file)));
 };
 
-function processTemplate(name: string, dokployArgs: string[]) {
+function processTemplate(name: string, composeArgs: string[]) {
   if (!isTemplate(name)) die(`Template '${name}' is invalid or not found.`);
 
   const dir = path.join(TEMPLATES_DIR, name);
@@ -51,16 +53,35 @@ function processTemplate(name: string, dokployArgs: string[]) {
 
   info(`Parsed template '${name}' — service='${serviceName}', port='${port}'`);
 
-  const overrideFile = `tmp_${Math.random().toString(36).substring(7)}.compose-override.yml`;
-  const overridePath = path.join(dir, overrideFile);
+  const overrideFile = `dokploy_forge_${Math.random().toString(36).substring(7)}.compose-override.yml`;
+  const overridePath = path.join(os.tmpdir(), overrideFile);
+  const composePath = path.join(dir, "docker-compose.yml");
+  const composeData = yaml.parse(fs.readFileSync(composePath, "utf-8")) || {};
+  const serviceNames = Object.keys(composeData.services || {});
 
-  fs.writeFileSync(
-    overridePath,
-    `services:\n  ${serviceName}:\n    ports:\n      - "${port}:${port}"\n`,
-    "utf-8",
+  const overrideData: any = { services: {} };
+  for (const sName of serviceNames) {
+    overrideData.services[sName] = {
+      deploy: {
+        resources: {
+          limits: {
+            cpus: "0.25",
+            memory: "128M",
+          },
+        },
+      },
+    };
+
+    if (sName === serviceName) {
+      overrideData.services[sName].ports = [`${port}:${port}`];
+    }
+  }
+
+  fs.writeFileSync(overridePath, yaml.stringify(overrideData), "utf-8");
+
+  info(
+    `Injecting port binding ${port}:${port} (for ${serviceName}) and resource limits (0.25 vCPU, 128MB RAM) for all services in template '${name}' → running docker compose...`,
   );
-
-  info(`Injecting port binding ${port}:${port} for template '${name}' → running docker compose...`);
 
   const cleanup = () => {
     try {
@@ -72,7 +93,15 @@ function processTemplate(name: string, dokployArgs: string[]) {
 
   const child = spawn(
     "docker",
-    ["compose", "-f", "docker-compose.yml", "-f", overrideFile, "up", ...dokployArgs],
+    [
+      "compose",
+      "-f",
+      "docker-compose.yml",
+      "-f",
+      overridePath,
+      "up",
+      ...composeArgs,
+    ],
     {
       cwd: dir,
       stdio: "inherit",
@@ -84,12 +113,14 @@ function processTemplate(name: string, dokployArgs: string[]) {
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0 || args[0] === "-h" || args[0] === "--help") {
-    console.log("Usage: npx tsx scripts/local-compose-up.ts <template-name> [docker compose arguments...]");
+    console.log(
+      "Usage: npx tsx scripts/local-compose-up.ts <template-name> [docker compose arguments...]",
+    );
     process.exit(0);
   }
 
-  const [templateName, ...dokployArgs] = args;
-  processTemplate(templateName, dokployArgs);
+  const [templateName, ...composeArgs] = args;
+  processTemplate(templateName, composeArgs);
 }
 
 main();

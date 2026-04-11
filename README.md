@@ -52,7 +52,7 @@ npm install
 
 ### Local Testing
 
-Since Dokploy templates omit port bindings, `local-compose-up` dynamically binds the port defined in `template.toml` so the service is accessible on your machine during testing.
+Since Dokploy templates omit port bindings, `local-compose-up` dynamically binds the port defined in `template.toml` so the service is accessible on your machine during testing. It also applies resource limits (0.25 vCPU, 128MB RAM) to all services to simulate the constrained environment of typical Dokploy deployments — helping you catch performance issues early.
 
 ---
 
@@ -103,7 +103,7 @@ npx tsx scripts/generate-base64.ts beszel --domain monitor.example.com
 
 ### `local-compose-up.ts` — Run locally before deploying
 
-Spins up a template locally with automatic port binding.
+Spins up a template locally with automatic port binding and resource limits (0.25 vCPU, 128MB RAM per service) to simulate a constrained environment similar to most Dokploy hosting deployments.
 
 ```bash
 # Run interactively
