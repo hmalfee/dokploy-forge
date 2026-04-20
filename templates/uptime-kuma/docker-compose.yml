@@ -1,7 +1,5 @@
-# just add the below label to any service:
-# labels:
-#   - "kuma.{{ container_name }}.docker.name={{ container_name }}"
-#   - "kuma.{{ container_name }}.docker.docker_container={{ container_name }}"
+# Automatic Docker container monitoring discovery via `container-sync`.
+# To ignore a container, add the label `kuma.ignore=true`
 
 services:
   kuma-init:
@@ -16,86 +14,214 @@ services:
       KUMA_URL: http://uptime-kuma:3001
       KUMA_USERNAME: ${KUMA_USERNAME:-admin}
       KUMA_PASSWORD: ${KUMA_PASSWORD:-admin1234}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Uptime Kuma}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      SMTP_TO_ADDRESS: ${SMTP_TO_ADDRESS:-}
       PYTHONUNBUFFERED: 1
     command:
       - sh
       - -c
       - |
         pip install uptime-kuma-api-v2 bcrypt --root-user-action=ignore -q
-        python -u - << 'EOF_PY'
-        import os, time, sqlite3, bcrypt
-        from uptime_kuma_api import UptimeKumaApi, DockerType
+        python -u - << 'EOF'
+        import os, time, sqlite3, bcrypt, json
+        from uptime_kuma_api import UptimeKumaApi, DockerType, NotificationType
 
-        URL      = os.environ['KUMA_URL']
-        USERNAME = os.environ.get('KUMA_USERNAME', '').strip()
-        PASSWORD = os.environ.get('KUMA_PASSWORD', '').strip()
-        DB_PATH  = '/app/data/kuma.db'
+        URL  = os.environ['KUMA_URL']
+        USER = os.environ.get('KUMA_USERNAME', '').strip()
+        PASS = os.environ.get('KUMA_PASSWORD', '').strip()
+        DB   = '/app/data/kuma.db'
+        STATE_FILE = '/app/data/kuma_init_state.json'
 
         def sync_db_user():
-            if not USERNAME or not PASSWORD or not os.path.exists(DB_PATH):
-                return
-            # SQLite user table columns: id, username, password, active...
-            conn = sqlite3.connect(DB_PATH)
+            if not (USER and PASS and os.path.exists(DB)): return
+            conn = sqlite3.connect(DB)
             cur  = conn.cursor()
-            
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user'")
-            if not cur.fetchone():
-                conn.close()
-                return
-
-            cur.execute("SELECT id FROM user LIMIT 1")
-            row = cur.fetchone()
+            if not cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='user'").fetchone():
+                conn.close(); return
+            row = cur.execute("SELECT id FROM user LIMIT 1").fetchone()
             if row:
-                print(f"Syncing credentials → {DB_PATH}", flush=True)
-                pw_hash = bcrypt.hashpw(PASSWORD.encode(), bcrypt.gensalt(10)).decode()
-                cur.execute("UPDATE user SET username=?, password=? WHERE id=?", (USERNAME, pw_hash, row[0]))
+                print(f"Syncing credentials → {DB}", flush=True)
+                cur.execute("UPDATE user SET username=?, password=? WHERE id=?",
+                    (USER, bcrypt.hashpw(PASS.encode(), bcrypt.gensalt(10)).decode(), row[0]))
                 conn.commit()
             conn.close()
 
         def ensure_docker_host(api):
-            if any(h['dockerType'] == DockerType.SOCKET for h in api.get_docker_hosts()):
-                print('Docker host already exists', flush=True); return
-            api.add_docker_host(name="local", dockerType=DockerType.SOCKET,
-                dockerDaemon="/var/run/docker.sock")
+            if any(h['dockerType'] == DockerType.SOCKET for h in api.get_docker_hosts()): return
+            api.add_docker_host(name="local", dockerType=DockerType.SOCKET, dockerDaemon="/var/run/docker.sock")
             print('Docker host created', flush=True)
+
+        def ensure_smtp(api):
+            env = {k: os.environ.get(k) for k in (
+                'SMTP_HOST', 'SMTP_PORT', 'SMTP_USERNAME', 'SMTP_PASSWORD',
+                'SMTP_FROM_NAME', 'SMTP_FROM_ADDRESS', 'SMTP_TO_ADDRESS')}
+            if not all(env.values()): return
+
+            state = {}
+            try:
+                with open(STATE_FILE) as f: state = json.load(f)
+            except Exception: pass
+
+            cfg = dict(
+                name='Default SMTP', type=NotificationType.SMTP,
+                isDefault=True, applyExisting=True,
+                smtpHost=env['SMTP_HOST'], smtpPort=int(env['SMTP_PORT']),
+                smtpFrom=f'"{env["SMTP_FROM_NAME"]}" <{env["SMTP_FROM_ADDRESS"]}>' if env['SMTP_FROM_NAME'] else env['SMTP_FROM_ADDRESS'],
+                smtpTo=env['SMTP_TO_ADDRESS'],
+                smtpUsername=env['SMTP_USERNAME'], smtpPassword=env['SMTP_PASSWORD']
+            )
+
+            eid = state.get('smtp_notification_id')
+            if eid and eid not in {n.get('id') for n in api.get_notifications()}: eid = None
+
+            try:
+                if eid:
+                    api.edit_notification(eid, **cfg)
+                    print(f'SMTP updated (id={eid})', flush=True)
+                else:
+                    res = api.add_notification(**cfg)
+                    nid = res.get('id') if getattr(res, 'get', None) else None
+                    if nid:
+                        state['smtp_notification_id'] = nid
+                        with open(STATE_FILE, 'w') as f: json.dump(state, f)
+                    print(f'SMTP created (id={nid})', flush=True)
+            except Exception as e:
+                print(f'SMTP setup failed: {e}', flush=True)
 
         while True:
             try:
                 sync_db_user()
                 with UptimeKumaApi(URL) as api:
-                    # API object waits for server response to needSetup.
-                    # Wait till it stops sending TimeoutErrors, or needs Setup
-                    # UptimeKuma v2 starts with a Socket connection timeout when it resets, so we loop.
-                    api.login(USERNAME, PASSWORD)
+                    api.login(USER, PASS)
                     ensure_docker_host(api)
-                print('Init done.', flush=True); break
+                    ensure_smtp(api)
+                print('Init done.', flush=True)
+                break
             except Exception as e:
-                # API throws error when setting up if it's already setup
-                try: 
-                    with UptimeKumaApi(URL) as api:
-                        # Attempt Setup if login fails and setup is needed
-                        res = api.setup(USERNAME, PASSWORD)
-                        print("Setup Response:", res, flush=True)
-                except:
-                    pass
+                try:
+                    with UptimeKumaApi(URL) as api: api.setup(USER, PASS)
+                except Exception: pass
                 print(f'Retrying in 3s: {e}', flush=True)
                 time.sleep(3)
-        EOF_PY
+        EOF
 
-  autokuma:
-    image: ghcr.io/bigboot/autokuma:2.0.0
+  container-sync:
+    image: python:3.12-alpine
     restart: unless-stopped
     depends_on:
       kuma-init:
         condition: service_completed_successfully
     environment:
-      AUTOKUMA__KUMA__URL: http://uptime-kuma:3001
-      AUTOKUMA__KUMA__USERNAME: ${KUMA_USERNAME:-admin}
-      AUTOKUMA__KUMA__PASSWORD: ${KUMA_PASSWORD:-admin1234}
-      AUTOKUMA__DEFAULT_SETTINGS: "docker.docker_host: 1"
+      KUMA_URL: http://uptime-kuma:3001
+      KUMA_USERNAME: ${KUMA_USERNAME:-admin}
+      KUMA_PASSWORD: ${KUMA_PASSWORD:-admin1234}
+      PYTHONUNBUFFERED: 1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - autokuma-data:/data
+      - container-sync-state:/state
+    command:
+      - sh
+      - -c
+      - |
+        pip install uptime-kuma-api-v2 docker --root-user-action=ignore -q
+        python -u - << 'EOF'
+        # State: { container_name: monitor_id }
+        # Ownership is ID-based — user-created monitors for the same name never conflict.
+
+        import json, os, time
+        from pathlib import Path
+        import docker
+        from uptime_kuma_api import DockerType, MonitorType, UptimeKumaApi
+
+        URL   = os.getenv("KUMA_URL")
+        USER  = os.getenv("KUMA_USERNAME")
+        PASS  = os.getenv("KUMA_PASSWORD")
+        STATE = Path("/state/state.json")
+        SKIP  = {"uptime-kuma", "kuma-init", "container-sync"}
+        dc    = docker.DockerClient(base_url="unix://var/run/docker.sock")
+
+        def tracked():
+            out = set()
+            for c in dc.containers.list(all=True):
+                labels = c.labels or {}
+                if c.name in SKIP or labels.get("com.docker.compose.service") in SKIP: continue
+                if str(labels.get("kuma.ignore", "")).lower() in {"true", "1", "yes"}: continue
+                if c.status == "running":
+                    out.add(c.name)
+                elif c.status == "exited":
+                    try:
+                        if int(c.attrs["State"]["ExitCode"]) != 0: out.add(c.name)
+                    except Exception:
+                        out.add(c.name)
+            return out
+
+        def load():
+            try: return json.loads(STATE.read_text())
+            except Exception: return {}
+
+        def save(s):
+            STATE.parent.mkdir(parents=True, exist_ok=True)
+            STATE.write_text(json.dumps(s, indent=2))
+
+        def host_id(api):
+            for h in api.get_docker_hosts() or []:
+                if h.get("dockerType") in (DockerType.SOCKET, "socket"):
+                    return str(h["id"])
+            api.add_docker_host(name="local", dockerType=DockerType.SOCKET, dockerDaemon="/var/run/docker.sock")
+            return host_id(api)
+
+        def add_monitor(api, name, hid):
+            res = api.add_monitor(
+                type=MonitorType.DOCKER, name=f"cs::{name}",
+                docker_container=name, docker_host=hid,
+                interval=60, retryInterval=60, maxretries=3
+            )
+            return int(res["monitorID"]) if res and "monitorID" in res else None
+
+        print("container-sync: started", flush=True)
+        state = load()
+
+        while True:
+            try:
+                desired = tracked()
+                with UptimeKumaApi(URL) as api:
+                    api.login(USER, PASS)
+                    hid   = host_id(api)
+                    dirty = False
+
+                    # Detect out-of-band monitor deletions via the UI and reset stale state entries.
+                    try:
+                        live_ids = {int(m["id"]) for m in (api.get_monitors() or []) if "id" in m}
+                        for name in list(state):
+                            if state[name] not in live_ids:
+                                print(f"container-sync: monitor {state[name]} for {name} missing, resetting", flush=True)
+                                del state[name]; dirty = True
+                    except Exception: pass
+
+                    for name in list(state):
+                        if name not in desired:
+                            try: api.delete_monitor(state[name])
+                            except Exception as e: print(f"container-sync: delete error: {e}", flush=True)
+                            del state[name]; dirty = True
+                            print(f"container-sync: removed {name}", flush=True)
+
+                    for name in desired:
+                        if name not in state:
+                            mid = add_monitor(api, name, hid)
+                            if mid:
+                                state[name] = mid; dirty = True
+                                print(f"container-sync: added {name} (id={mid})", flush=True)
+
+                    if dirty: save(state)
+            except Exception as e:
+                print(f"container-sync: error: {e}", flush=True)
+            time.sleep(5)
+        EOF
 
   uptime-kuma:
     image: louislam/uptime-kuma:2.2.1
@@ -119,5 +245,5 @@ services:
       start_period: 30s
 
 volumes:
-  uptimekuma-data:
-  autokuma-data:
+  uptimekuma-data: {}
+  container-sync-state: {}
