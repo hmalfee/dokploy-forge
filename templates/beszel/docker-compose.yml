@@ -161,20 +161,27 @@ services:
             print("post: already provisioned — skipping")
 
         # SMTP (every boot if configured)
-        if smtp := os.getenv("SMTP_HOST"):
-            port = int(os.getenv("SMTP_PORT", 587))
+        host = os.getenv("SMTP_HOST")
+        port = os.getenv("SMTP_PORT")
+        username = os.getenv("SMTP_USERNAME")
+        password = os.getenv("SMTP_PASSWORD")
+        sender_address = os.getenv("SMTP_SENDER_ADDRESS")
+        sender_name = os.getenv("SMTP_SENDER_NAME")
+
+        if all([host, port, username, password, sender_address]):
+            port_int = int(port)
             r = api("PATCH", "/api/settings", {"smtp": {
-                "enabled": True, "host": smtp, "port": port,
-                "username": os.getenv("SMTP_USERNAME", ""),
-                "password": os.getenv("SMTP_PASSWORD", ""),
-                "tls": port == 465, "authMethod": "PLAIN",
+                "enabled": True, "host": host, "port": port_int,
+                "username": username,
+                "password": password,
+                "tls": port_int == 465, "authMethod": "PLAIN",
             }, "meta": {
-                "senderName":    os.getenv("SMTP_SENDER_NAME", "Beszel"),
-                "senderAddress": os.getenv("SMTP_SENDER_ADDRESS", ""),
+                "senderName":    sender_name,
+                "senderAddress": sender_address,
             }}, token=tok)
-            print(f"post: SMTP {'applied' if r else 'FAILED'} → {smtp}:{port}")
+            print(f"post: SMTP {'applied' if r else 'FAILED'} → {host}:{port}")
         else:
-            print("post: SMTP_HOST not set — skipped")
+            print("post: Incomplete SMTP config — skipped (requires HOST, PORT, USERNAME, PASSWORD, SENDER_ADDRESS)")
 
         # Sync ADMIN_EMAIL into notification email list (every boot)
         r = api("GET", "/api/collections/user_settings/records", token=tok,
