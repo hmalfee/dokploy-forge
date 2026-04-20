@@ -114,7 +114,7 @@ function main() {
   const args = process.argv.slice(2);
   if (args.length === 0 || args[0] === "-h" || args[0] === "--help") {
     console.log(
-      "Usage: npx tsx scripts/local-compose-up.ts <template-name> [docker compose arguments...]",
+      "Usage: npm run compose-up -- <template-name> [docker compose arguments...]",
     );
     process.exit(0);
   }

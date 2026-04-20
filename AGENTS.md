@@ -4,7 +4,7 @@ This repository contains templates and scripts for Dokploy. Read `README.md` and
 
 ## 1. Local Development & Workflow
 
-- Always use the wrapper script to start services: `npx tsx scripts/local-compose-up.ts <template-name> [options]` — never run `docker compose up` directly.
+- Always use the wrapper script to start services: `npm run compose-up -- <template-name> [options]` — never run `docker compose up` directly.
 - You may run `docker compose down` to bring down local instances.
 
 ## 2. Common Docker Compose Mistakes

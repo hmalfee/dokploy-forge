@@ -39,15 +39,15 @@ npm install
 2. Create a folder under `templates/` (e.g., `templates/my-template`) containing both files.
 3. Validate your template against Dokploy's rules:
    ```bash
-   npx tsx scripts/validate.ts my-template
+   npm run validate -- my-template
    ```
 4. Test it locally before deploying:
    ```bash
-   npx tsx scripts/local-compose-up.ts my-template
+   npm run compose-up -- my-template
    ```
 5. Generate the Base64 import string when you're ready:
    ```bash
-   npx tsx scripts/generate-base64.ts my-template
+   npm run generate -- my-template
    ```
 
 ### Local Testing
@@ -70,47 +70,47 @@ Done. ✅
 
 ## 📜 Scripts Reference
 
-### `validate.ts` — Lint your templates
+### `validate` — Lint your templates
 
 Validates templates against Dokploy's official rules.
 
 ```bash
 # Validate a single template
-npx tsx scripts/validate.ts beszel
+npm run validate -- beszel
 
 # Validate all templates at once
-npx tsx scripts/validate.ts --all
+npm run validate -- --all
 ```
 
 ---
 
-### `generate-base64.ts` — Build the import string
+### `generate` — Build the import string
 
 Generates the Base64 import string and saves it to `output/`.
 
 ```bash
 # Generate for a specific template
-npx tsx scripts/generate-base64.ts beszel
+npm run generate -- beszel
 
 # Generate for all templates
-npx tsx scripts/generate-base64.ts --all
+npm run generate -- --all
 
 # Inject a custom domain at generation time
-npx tsx scripts/generate-base64.ts beszel --domain monitor.example.com
+npm run generate -- beszel --domain monitor.example.com
 ```
 
 ---
 
-### `local-compose-up.ts` — Run locally before deploying
+### `compose-up` — Run locally before deploying
 
 Spins up a template locally with automatic port binding and resource limits (0.25 vCPU, 128MB RAM per service) to simulate a constrained environment similar to most Dokploy hosting deployments.
 
 ```bash
 # Run interactively
-npx tsx scripts/local-compose-up.ts beszel
+npm run compose-up -- beszel
 
 # Run in detached mode
-npx tsx scripts/local-compose-up.ts beszel -d
+npm run compose-up -- beszel -d
 ```
 
 ---
@@ -123,9 +123,6 @@ dokploy-forge/
 │   ├── beszel/
 │   ├── dozzle/
 │   └── uptime-kuma/
-├── scripts/
-│   ├── validate.ts
-│   ├── generate-base64.ts
-│   └── local-compose-up.ts
+├── scripts/            # TypeScript runners used by npm scripts
 └── output/             # Generated Base64 strings land here
 ```

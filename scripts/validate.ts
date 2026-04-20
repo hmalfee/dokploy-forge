@@ -28,12 +28,12 @@ function listTemplates() {
 function parseTargets(args: string[]): string[] {
   const all = args.includes("--all");
   const name = args.find((a) => !a.startsWith("-"));
-  
+
   if (!all && !name) {
-    console.log("Usage: npx tsx scripts/validate.ts <template-name> [--all]");
+    console.log("Usage: npm run validate -- <template-name> [--all]");
     process.exit(0);
   }
-  
+
   if (all) return listTemplates();
   if (!isTemplate(name!)) die(`Template '${name}' is invalid or not found.`);
   return [name!];
@@ -44,8 +44,14 @@ function processTemplate(name: string) {
   console.log(`\n  🔍 Validating template '${name}'\n${"─".repeat(40)}`);
 
   try {
-    execSync(`npx tsx scripts/dokploy-utils/validate-template.ts --dir ${dir}`, { stdio: "inherit" });
-    execSync(`npx tsx scripts/dokploy-utils/validate-docker-compose.ts --file ${path.join(dir, "docker-compose.yml")}`, { stdio: "inherit" });
+    execSync(
+      `npx tsx scripts/dokploy-utils/validate-template.ts --dir ${dir}`,
+      { stdio: "inherit" },
+    );
+    execSync(
+      `npx tsx scripts/dokploy-utils/validate-docker-compose.ts --file ${path.join(dir, "docker-compose.yml")}`,
+      { stdio: "inherit" },
+    );
   } catch {
     die(`Validation failed for template '${name}'.`);
   }

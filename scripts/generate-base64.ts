@@ -36,7 +36,10 @@ function processTemplate(name: string, domain: string | null) {
     die(`Validation failed for '${name}'. Please fix the errors above.`);
   }
 
-  const composeContent = fs.readFileSync(path.join(dir, "docker-compose.yml"), "utf-8");
+  const composeContent = fs.readFileSync(
+    path.join(dir, "docker-compose.yml"),
+    "utf-8",
+  );
   let configContent = fs.readFileSync(path.join(dir, "template.toml"), "utf-8");
 
   if (domain) {
@@ -53,11 +56,11 @@ function processTemplate(name: string, domain: string | null) {
     JSON.stringify({ compose: composeContent, config: configContent }),
     "utf-8",
   ).toString("base64");
-  
+
   if (!fs.existsSync(OUTPUT_DIR)) {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
-  
+
   const outputPath = path.join(OUTPUT_DIR, `${name}.txt`);
   fs.writeFileSync(outputPath, base64Str + "\n", "utf-8");
   info(`Generated: ${outputPath}`);
@@ -71,8 +74,10 @@ function main() {
   const domain = domainIdx !== -1 ? args[domainIdx + 1] : null;
 
   if (!isAll && !name) {
-    console.log("Usage: npx tsx scripts/generate-base64.ts <template-name> [--domain <value>]");
-    console.log("       npx tsx scripts/generate-base64.ts --all [--domain <value>]");
+    console.log(
+      "Usage: npm run generate -- <template-name> [--domain <value>]",
+    );
+    console.log("       npm run generate -- --all [--domain <value>]");
     process.exit(0);
   }
 
