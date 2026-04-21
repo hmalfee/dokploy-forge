@@ -1,3 +1,19 @@
+/**
+* Workflow for `npm run compose-up -- <template-name> [args]`:
+* 
+* 1) Validate template structure and parse `template.toml`.
+* 2) Create one per-run temporary directory under cache.
+* 3) Materialize mount files from both sources into `../files/...`:
+*   - `[[config.mounts]]` entries from `template.toml`
+*   - `templates/<template>/mounts/**` recursive directory contents
+* 4) Build a compose override that injects:
+  - port mapping from the first `[[config.domains]]`
+  - resource limits for all services
+  - volume remaps for `../files/...` bind sources to runtime materialized files
+* 5) Run `docker compose` with original compose + override.
+* 6) Cleanup the per-run temporary directory on process exit.
+*/
+
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -12,6 +28,14 @@ const die = (msg: string): never => {
 const info = (msg: string) => console.log(`✅ ${msg}`);
 
 const TEMPLATES_DIR = path.resolve(process.cwd(), "templates");
+const CACHE_BASE_DIR = process.env.XDG_CACHE_HOME
+  ? path.resolve(process.env.XDG_CACHE_HOME)
+  : path.join(os.homedir(), ".cache");
+const DOKPLOY_FORGE_TMP_ROOT = path.join(
+  CACHE_BASE_DIR,
+  "dokploy-forge",
+  "tmp",
+);
 const REQUIRED_FILES = ["template.toml", "docker-compose.yml"];
 
 const isTemplate = (name: string) => {
@@ -41,6 +65,68 @@ function processTemplate(name: string, composeArgs: string[]) {
     die(`Failed to parse ${tomlPath}: ${e.message}`);
   }
 
+  const mounts = Array.isArray(tomlData?.config?.mounts)
+    ? tomlData.config.mounts
+    : [];
+  const templateMountsDir = path.join(dir, "mounts");
+  const templateMountsPathExists = fs.existsSync(templateMountsDir);
+  if (
+    templateMountsPathExists &&
+    !fs.statSync(templateMountsDir).isDirectory()
+  ) {
+    die(`'${templateMountsDir}' exists but is not a directory.`);
+  }
+
+  fs.mkdirSync(DOKPLOY_FORGE_TMP_ROOT, { recursive: true });
+  const runTempDir = fs.mkdtempSync(
+    path.join(DOKPLOY_FORGE_TMP_ROOT, `dokploy-forge-${name}-`),
+  );
+  let mountDir: string | null = null;
+
+  if (mounts.length > 0 || templateMountsPathExists) {
+    mountDir = path.join(runTempDir, "files");
+    fs.mkdirSync(mountDir, { recursive: true });
+
+    mounts.forEach((mount: any, index: number) => {
+      const filePath =
+        typeof mount?.filePath === "string" ? mount.filePath : null;
+      const content = typeof mount?.content === "string" ? mount.content : null;
+      if (!filePath || content === null) return;
+
+      const relPath = filePath.replace(/^\/+/, "");
+      const hostPath = path.join(
+        mountDir as string,
+        relPath || `mount_${index}`,
+      );
+
+      fs.mkdirSync(path.dirname(hostPath), { recursive: true });
+      fs.writeFileSync(hostPath, content, "utf-8");
+    });
+
+    const copyMountsDirectory = (sourceDir: string, targetDir: string) => {
+      const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const sourcePath = path.join(sourceDir, entry.name);
+        const targetPath = path.join(targetDir, entry.name);
+
+        if (entry.isDirectory()) {
+          fs.mkdirSync(targetPath, { recursive: true });
+          copyMountsDirectory(sourcePath, targetPath);
+          continue;
+        }
+
+        if (entry.isFile()) {
+          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+          fs.copyFileSync(sourcePath, targetPath);
+        }
+      }
+    };
+
+    if (templateMountsPathExists) {
+      copyMountsDirectory(templateMountsDir, mountDir);
+    }
+  }
+
   const domains = tomlData?.config?.domains ?? [];
   if (domains.length === 0)
     die(`At least one [[config.domains]] block is required in '${tomlPath}'.`);
@@ -53,8 +139,7 @@ function processTemplate(name: string, composeArgs: string[]) {
 
   info(`Parsed template '${name}' — service='${serviceName}', port='${port}'`);
 
-  const overrideFile = `dokploy_forge_${Math.random().toString(36).substring(7)}.compose-override.yml`;
-  const overridePath = path.join(os.tmpdir(), overrideFile);
+  const overridePath = path.join(runTempDir, "compose-override.yml");
   const composePath = path.join(dir, "docker-compose.yml");
   const composeData = yaml.parse(fs.readFileSync(composePath, "utf-8")) || {};
   const serviceNames = Object.keys(composeData.services || {});
@@ -75,6 +160,34 @@ function processTemplate(name: string, composeArgs: string[]) {
     if (sName === serviceName) {
       overrideData.services[sName].ports = [`${port}:${port}`];
     }
+
+    const serviceVolumes = composeData?.services?.[sName]?.volumes;
+    if (mountDir && Array.isArray(serviceVolumes)) {
+      const remappedVolumes = serviceVolumes
+        .map((volume: any) => {
+          if (typeof volume !== "string") return null;
+
+          const parts = volume.split(":");
+          if (parts.length < 2) return null;
+
+          const source = parts[0];
+          if (!(source === "../files" || source.startsWith("../files/"))) {
+            return null;
+          }
+
+          const relativePath = source.replace(/^\.\.\/files\/?/, "");
+          const remappedSource = relativePath
+            ? path.join(mountDir, relativePath)
+            : mountDir;
+
+          return [remappedSource, ...parts.slice(1)].join(":");
+        })
+        .filter((value: string | null) => value !== null);
+
+      if (remappedVolumes.length > 0) {
+        overrideData.services[sName].volumes = remappedVolumes;
+      }
+    }
   }
 
   fs.writeFileSync(overridePath, yaml.stringify(overrideData), "utf-8");
@@ -85,7 +198,9 @@ function processTemplate(name: string, composeArgs: string[]) {
 
   const cleanup = () => {
     try {
-      if (fs.existsSync(overridePath)) fs.unlinkSync(overridePath);
+      if (fs.existsSync(runTempDir)) {
+        fs.rmSync(runTempDir, { recursive: true, force: true });
+      }
     } catch {}
   };
   process.on("exit", cleanup);

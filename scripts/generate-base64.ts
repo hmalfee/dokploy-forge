@@ -1,3 +1,16 @@
+/**
+ * Workflow for `npm run generate -- <template-name> [--domain <value>]` or `npm run generate -- --all`:
+ *
+ * 1) Validate template structure and parse `template.toml`.
+ * 2) Read `docker-compose.yml` from templates/<template>/.
+ * 3) Recursively collect all files from `templates/<template>/mounts/**`:
+ *    - Preserve nested folder structure in filePath (e.g., `config/app.conf`).
+ *    - Convert to inline [[config.mounts]] entries for Dokploy deployment.
+ * 4) Optionally inject --domain flag value into [variables] section.
+ * 5) Combine compose + config into JSON and Base64 encode.
+ * 6) Write to output/<template>.txt for import into Dokploy.
+ */
+
 import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
@@ -26,6 +39,39 @@ function listTemplates() {
     .map((e) => e.name);
 }
 
+function collectMountsFromFilesystem(dir: string): string {
+  const mountsDir = path.join(dir, "mounts");
+  let mountsToml = "";
+
+  if (!fs.existsSync(mountsDir)) {
+    return mountsToml;
+  }
+
+  function walkDir(currentPath: string, relativePath: string = "") {
+    const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      const relPath = relativePath
+        ? `${relativePath}/${entry.name}`
+        : entry.name;
+
+      if (entry.isDirectory()) {
+        walkDir(fullPath, relPath);
+      } else if (entry.isFile()) {
+        const content = fs.readFileSync(fullPath, "utf-8");
+        const escaped = content
+          .replace(/\\/g, "\\\\")
+          .replace(/'''/g, "\\'\\'\\'");
+        mountsToml += `\n[[config.mounts]]\nfilePath = "${relPath}"\ncontent = '''\n${escaped}\n'''\n`;
+      }
+    }
+  }
+
+  walkDir(mountsDir);
+  return mountsToml;
+}
+
 function processTemplate(name: string, domain: string | null) {
   if (!isTemplate(name)) die(`Template '${name}' is invalid or not found.`);
 
@@ -50,6 +96,12 @@ function processTemplate(name: string, domain: string | null) {
     configContent = pattern.test(configContent)
       ? configContent.replace(pattern, replacement)
       : `[variables]\n${replacement}\n\n${configContent}`;
+  }
+
+  const mountsToml = collectMountsFromFilesystem(dir);
+  if (mountsToml) {
+    info(`Including ${dir}/mounts/** files as inline [[config.mounts]]`);
+    configContent += mountsToml;
   }
 
   const base64Str = Buffer.from(

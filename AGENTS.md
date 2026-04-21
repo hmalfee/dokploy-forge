@@ -6,13 +6,14 @@ This repository contains templates and scripts for Dokploy. Read `README.md` and
 
 - Always use the wrapper script to start services: `npm run compose-up -- <template-name> [options]` — never run `docker compose up` directly.
 - You may run `docker compose down` to bring down local instances.
+- For mounts: `[[config.mounts]]` in `template.toml` is standard Dokploy; `templates/<template>/mounts/**` is Dokploy Forge-specific. Locally, `npm run compose-up` materializes both sources into `../files/` for testing.
 
-## 2. Common Docker Compose Mistakes
+## 2. Common Docker Compose Mistakes in Dokploy
 
 - Use `expose:` for ports, not `ports:` — Dokploy handles all external port routing.
 - Omit `container_name:` — Dokploy manages container names automatically.
 - Omit explicit `networks:` — Dokploy creates networks automatically for isolation.
-- Use relative paths for volume mounts (e.g., `"../files/my-database:/var/lib/mysql"`), never absolute paths.
+- For file mounts via `[[config.mounts]]` in `template.toml` or `templates/<template>/mounts/**` directory, Dokploy materializes them on `../files`. So, reference them using `../files` (e.g., `../files/app.conf:/etc/app.conf:ro`) instead of absolute paths.
 - Set `version` to `"3.8"` only.
 - Name services in lowercase with hyphens (e.g., `my-service`, not `my_service` or `MyService`).
 

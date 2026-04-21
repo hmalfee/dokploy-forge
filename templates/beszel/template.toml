@@ -5,6 +5,7 @@ main_domain = "${domain}"
 env = [
   "ADMIN_EMAIL=",
   "ADMIN_PASSWORD=",
+  "SYSTEM_NAME=",
   "SMTP_HOST=",
   "SMTP_PORT=",
   "SMTP_USERNAME=",

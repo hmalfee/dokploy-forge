@@ -52,7 +52,29 @@ npm install
 
 ### Local Testing
 
-Since Dokploy templates omit port bindings, `local-compose-up` dynamically binds the port defined in `template.toml` so the service is accessible on your machine during testing. It also applies resource limits (0.25 vCPU, 128MB RAM) to all services to simulate the constrained environment of typical Dokploy deployments — helping you catch performance issues early.
+When you run `npm run compose-up`, your template is tested in a local environment that mirrors Dokploy's constraints:
+
+- Port bindings are dynamically injected for accessibility during testing
+- Resource limits (0.25 vCPU, 128MB RAM) are applied to all services to simulate production environments — helping you catch performance issues early
+
+#### File Mounts
+
+**Standard Dokploy:** `[[config.mounts]]` in `template.toml` lets you define files inline. This is equivalent to adding a File Mount in `Volumes` section via the UI's `Advanced` tab.
+
+**Dokploy Forge exclusive:** `templates/<template>/mounts/**` directory — your template's real filesystem payload. Great when you need to have a lot of files or syntax highlighting for files.
+
+Example:
+
+```
+templates/uptime-kuma/mounts/
+├── hello/
+│   └── hello-world.py
+└── config.yaml
+```
+
+Both sources are materialized to `../files/` on deployment. Your `docker-compose.yml` mounts from there (e.g., `../files/hello/hello-world.py:/app/scripts/hello-world.py:ro`).
+
+When you run `npm run compose-up`, we materialize both sources into `../files/` locally, giving you the exact same mount behavior as Dokploy. This ensures your template works identically in local testing and production.
 
 ---
 
